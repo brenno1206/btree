@@ -18,58 +18,77 @@ void main()
 }
 
 
-NO *criarNo() {
-
+NO *criarNo(int id_pagina) {
     NO *novo_no = (NO*) malloc(sizeof(NO));
 
     if(novo_no == NULL)
         return NULL;
 
+    novo_no->id_pagina = id_pagina;
     novo_no->eh_folha = 1;
+    novo_no->num_chaves = 0;
 
-    for(int i = 0; i < M; i++)
-        novo_no->filhos[i] = NULL;
+    // Em disco, não existe 'NULL'. Usamos -1 para indicar que o filho não existe.
+    for(int i = 0; i < M; i++) {
+        novo_no->filhos[i] = -1;
+    }
 
     return novo_no;
 }
 
-arvB criarArv(FILE *dados, FILE *arq_indice) {
-    arvB btree = criarNo(); 
+
+// Agora a função retorna o ID da página raiz (geralmente 0), em vez de um ponteiro na RAM
+int criarArv(FILE *dados, FILE *arq_indice) {
+    
+    // 1. Cria a página raiz na RAM com ID 0
+    NO *raiz = criarNo(0);
+    if (raiz == NULL) return -1;
+
+    // 2. Grava a raiz vazia no disco LOGO DE CARA em formato TXT com tamanho fixo.
+    fseek(arq_indice, 0, SEEK_SET);
+    
+    // Formato exigido: nó, qtd, [chave, pos_na_fonte]..., [filho]...
+    // Usamos %03d e %04d para garantir que o número de caracteres nunca mude.
+    // Exemplo para M=3 (2 chaves, 3 filhos): 
+    // 000, 0, [-001, -001], [-001, -001], [-001, -001, -001]
+    fprintf(arq_indice, "%03d, %d, [%04d, %04d], [%04d, %04d], [%03d, %03d, %03d]\n", 
+            raiz->id_pagina, 
+            raiz->num_chaves,
+            -1, -1, // Placeholder para Chave 1 (matricula, indice)
+            -1, -1, // Placeholder para Chave 2 (matricula, indice)
+            raiz->filhos[0], raiz->filhos[1], raiz->filhos[2]);
+
+    // 3. Libera da RAM! 
+    free(raiz);
 
     char texto_linha[100];
-    int posicao = 0;
+    int posicao_bytes_fonte = 0; // Isso será o nosso 'pos_na_fonte'
 
-    // O fgets lê a linha inteira de uma vez. Quando o laço repetir, 
-    // ele já vai ler a próxima linha automaticamente.
     while(fgets(texto_linha, sizeof(texto_linha), dados) != NULL) {
-        
-        // 1. Salvar o tamanho da linha ANTES do strtok estragar a string original!
         int tamanho_linha = strlen(texto_linha);
 
-        // 2. Extrair o PRIMEIRO valor (o índice)
         char *token = strtok(texto_linha, ",");
-        if (token == NULL) continue; // Prevenção contra linhas vazias
-        int id_indice = atoi(token);
+        if (token == NULL) continue;
+        int id_indice = atoi(token); 
 
-        // 3. Extrair o SEGUNDO valor (a matrícula)
         token = strtok(NULL, ",");
-        if (token == NULL) continue; // Prevenção contra linhas mal formatadas
+        if (token == NULL) continue;
         int matricula = atoi(token);
 
-        // 4. Montar a struct da chave
         chave nova_chave;
-        nova_chave.indice = id_indice;
         nova_chave.matricula = matricula;
+        nova_chave.indice = posicao_bytes_fonte; 
 
-        // 5. Cadastrar na árvore (e possivelmente gravar no arquivo de índice)
-        cadastrar(arq_indice, nova_chave, btree);
+        // 4. Inicia o cadastro sempre a partir da raiz (Página 0)
+        cadastrar(arq_indice, nova_chave, 0);
 
-        // 6. Atualizar a posição (deslocamento em bytes no arquivo)
-        posicao += tamanho_linha;
+        // 5. Atualiza o offset para a próxima linha do fonte.txt
+        posicao_bytes_fonte += tamanho_linha;
     }
 
-    return btree;
+    return 0; // Retorna o ID da página raiz
 }
+
 
 int cadastrar(FILE *arvore, chave nova_chave, NO *no) {
     if (no->eh_folha) {

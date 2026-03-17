@@ -19,8 +19,9 @@ typedef struct _chave {
 } chave;
 
 typedef struct _NO {
-    chave chaves[M-1];
-    struct NO *filhos[M];
+    int id_pagina; // Identificador único para cada página (pode ser um número sequencial ou um offset no arquivo)
+    chave chaves[M - 1]; // Cada nó pode conter no máximo M-1
+    int filhos[M];
     int num_chaves;
     int eh_folha;
 } NO;
