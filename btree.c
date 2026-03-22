@@ -2,20 +2,34 @@
 #include <stdlib.h>
 #include "btree.h"
 
+// ============================================================================
+// PROTÓTIPOS DE FUNÇÕES INTERNAS (AUXILIARES)
+// Declarar aqui garante que o compilador as conheça, evitando erros de ordem.
+// ============================================================================
 int inserirRecursivo(NO *atual, chave *nova, chave *promovida, NO **novo_filho_dir);
+void realizarSplit(NO *atual, chave *nova, NO *filho_da_nova, chave *promovida, NO **novo_filho_dir);
+NO* buscarNaArvore(NO *atual, int matricula, int *pos_encontrada);
+void mapearArvore(NO *atual, NO **mapa, int *contador_id);
+int obterIdNo(NO **mapa, int total_nos, NO *alvo);
+void liberarNo(NO *atual);
 
+// ============================================================================
+// FUNÇÃO PRINCIPAL
+// ============================================================================
 int main()
 {
+    // 'a+' para dados (adiciona no fim) e 'w+' para índice (sobrescreve o estado)
     FILE *dados = fopen("fonte.txt", "a+");
     FILE *indice = fopen("indice.txt", "w+");
 
     if (dados == NULL){
-        printf("O arquivo 'fonte.txt' não foi aberto.\n");
+        printf("Erro: O arquivo 'fonte.txt' não foi aberto.\n");
         return 1;
     }
 
     if (indice == NULL){
-        printf("O arquivo 'indice.txt' não foi aberto.\n");
+        printf("Erro: O arquivo 'indice.txt' não foi aberto.\n");
+        fclose(dados); // Boa prática: fechar o que já foi aberto em caso de erro
         return 1;
     }
 
@@ -23,6 +37,10 @@ int main()
 
     if (btree == NULL) {
         printf("Falha ao criar arvore B.\n");
+    } else {
+        // Exemplo de uso: aqui você chamaria gravar(btree, indice), pesquisar(), etc.
+        // gravar(btree, indice);
+        destruirArvore(btree); // Limpa a memória antes de sair
     }
 
     fclose(dados);
@@ -31,55 +49,57 @@ int main()
     return 0;
 }
 
-NO *criarNO() {
+// ============================================================================
+// 1. CRIAÇÃO E INICIALIZAÇÃO
+// ============================================================================
 
+NO *criarNO() {
     NO *no = (NO*) malloc(sizeof(NO));
 
     if(no == NULL){
-        printf("Falha ao alocar memória para nó\n");
+        printf("Erro: Falha ao alocar memória para o nó.\n");
         return NULL;
     }
 
     no->qtd = 0;
-    no->eh_folha = 1;
+    no->eh_folha = 1; // Por padrão, todo nó nasce como folha
 
+    // Inicializa ponteiros com NULL para evitar lixo de memória
     for(int i = 0; i < M; i++){
         no->filhos[i] = NULL;
     }
 
+    // Inicializa chaves com -1 (indicando espaço vazio)
     for(int i = 0; i < M-1; i++){
         no->chaves[i].matricula = -1;
         no->chaves[i].posicao = -1;
     }
 
     printf("[DEBUG] Nó criado com sucesso (folha=%d, qtd=%d)\n", no->eh_folha, no->qtd);
-
     return no;
 }
 
 arvB *criarArv(FILE *dados) {
     if (dados == NULL) {
-        printf("arquivo de dados eh NULL em criarArv\n");
+        printf("Erro: Arquivo de dados é NULL em criarArv.\n");
         return NULL;
     }
 
+    // Aloca o ponteiro que vai segurar a raiz da árvore
     arvB* raiz = (arvB*) malloc(sizeof(arvB));
-
     if(raiz == NULL){
-        printf("Falha ao alocar memória para raiz\n");
+        printf("Erro: Falha ao alocar memória para raiz.\n");
         return NULL;
     }
 
     *raiz = criarNO();
-
     if (*raiz == NULL) {
-        printf("Falha ao criar no raiz\n");
+        printf("Erro: Falha ao criar o nó raiz.\n");
         free(raiz);
         return NULL;
     }
     
     rewind(dados);
-
     popularArv(raiz, dados); 
 
     return raiz;
@@ -88,19 +108,25 @@ arvB *criarArv(FILE *dados) {
 int popularArv(arvB *raiz, FILE *dados) {
     char texto_linha[200];
 
+    // Lê linha por linha do arquivo de dados original
     while(fgets(texto_linha, sizeof texto_linha, dados) != NULL) {
         int posicao = 0;
         int matricula = 0;
 
+        // Tenta extrair a posição e a matrícula. Ignora o resto da string.
         if (sscanf(texto_linha, " %d , %d", &posicao, &matricula) == 2) {
             chave chave_lida = { matricula, posicao };
             cadastrar(raiz, &chave_lida); 
         } else {
-            printf("Linha com formato inesperado: %s", texto_linha);
+            printf("Aviso: Linha com formato inesperado ignorada: %s", texto_linha);
         }
     }
     return 1;
 }
+
+// ============================================================================
+// 2. INSERÇÃO E BALANCEAMENTO (SPLIT)
+// ============================================================================
 
 int cadastrar(arvB *raiz, chave *chave_nova) {
     if (raiz == NULL || *raiz == NULL || chave_nova == NULL) return -1;
@@ -108,63 +134,64 @@ int cadastrar(arvB *raiz, chave *chave_nova) {
     chave promovida;
     NO *novo_filho_dir = NULL;
 
-    // Tenta inserir a partir da raiz original
+    // Dispara a recursão para tentar inserir a chave
     int splitou = inserirRecursivo(*raiz, chave_nova, &promovida, &novo_filho_dir);
 
+    // Se o retorno foi 1, significa que a raiz original transbordou e rachou ao meio
     if (splitou) {
-        // Se a raiz dividiu, a árvore "cresce" criando uma nova raiz acima dela
         NO *nova_raiz = criarNO();
-        nova_raiz->eh_folha = 0;
+        nova_raiz->eh_folha = 0; // Nova raiz nunca é folha (terá filhos)
         nova_raiz->qtd = 1;
-        nova_raiz->chaves[0] = promovida;
+        nova_raiz->chaves[0] = promovida; // Recebe a chave que subiu
         
-        // Os filhos da nova raiz são a raiz antiga e o novo nó gerado no split
+        // Conecta a antiga raiz à esquerda e o novo nó gerado à direita
         nova_raiz->filhos[0] = *raiz;
         nova_raiz->filhos[1] = novo_filho_dir;
         
-        // Atualiza o ponteiro da árvore para apontar para a nova raiz
+        // Atualiza a árvore para apontar para o novo "topo"
         *raiz = nova_raiz; 
     }
-
     return 0;
 }
-
 
 int inserirRecursivo(NO *atual, chave *nova, chave *promovida, NO **novo_filho_dir) {
     int i = atual->qtd - 1;
 
+    // CASO 1: Chegamos numa folha (onde a inserção real acontece)
     if (atual->eh_folha) {
         if (atual->qtd < M - 1) {
-            // Tem espaço na folha: apenas insere
+            // Acomoda a nova chave empurrando as maiores para a direita
             while (i >= 0 && atual->chaves[i].matricula > nova->matricula) {
                 atual->chaves[i + 1] = atual->chaves[i];
                 i--;
             }
             atual->chaves[i + 1] = *nova;
             atual->qtd++;
-            return 0; // Não houve split
-        } 
-        else {
-            // NÓ FOLHA CHEIO: Chama a função de split passando NULL como filho
+            return 0; // Inseriu sem problemas
+        } else {
+            // Nó está cheio: precisamos rachar a folha
             realizarSplit(atual, nova, NULL, promovida, novo_filho_dir);
             return 1; // Avisa o pai que houve split
         }
-    } else {
-        // NÃO É FOLHA: Descobre por qual filho descer
+    } 
+    // CASO 2: Nó interno (apenas navegamos descendo para o filho correto)
+    else {
+        // Encontra o ponteiro de descida correto
         while (i >= 0 && atual->chaves[i].matricula > nova->matricula) {
             i--;
         }
-        i++; // Índice do filho correto
+        i++; // Índice do filho escolhido
 
         chave ch_promovida_filho;
         NO *novo_filho = NULL;
 
-        // Desce recursivamente
+        // Desce para o filho
         int splitou = inserirRecursivo(atual->filhos[i], nova, &ch_promovida_filho, &novo_filho);
 
+        // Se o filho transbordou, precisamos acomodar a chave que subiu
         if (splitou) {
             if (atual->qtd < M - 1) {
-                // Tem espaço no nó interno: apenas acomoda a chave promovida
+                // Há espaço neste nó interno para acomodar a chave que subiu
                 int j = atual->qtd - 1;
                 while (j >= i) {
                     atual->chaves[j + 1] = atual->chaves[j];
@@ -174,30 +201,30 @@ int inserirRecursivo(NO *atual, chave *nova, chave *promovida, NO **novo_filho_d
                 atual->chaves[i] = ch_promovida_filho;
                 atual->filhos[i + 1] = novo_filho;
                 atual->qtd++;
-                return 0; // Split resolvido
-            } 
-            else {
-                // NÓ INTERNO CHEIO: Chama a função de split passando o novo_filho
+                return 0; // Problema resolvido, não propaga mais o split
+            } else {
+                // Nó interno também está cheio (Split em cascata)
                 realizarSplit(atual, &ch_promovida_filho, novo_filho, promovida, novo_filho_dir);
-                return 1; // Propaga o split para cima
+                return 1; // Propaga para o avô
             }
         }
         return 0; 
     }
 }
 
+// Função unificada de Split (serve tanto para folhas quanto para nós internos)
 void realizarSplit(NO *atual, chave *nova, NO *filho_da_nova, chave *promovida, NO **novo_filho_dir) {
     chave temp_chaves[M];
     NO *temp_filhos[M + 1];
 
-    // 1. Copia os dados atuais para os arrays temporários
+    // 1. Copia dados para arrays temporários maiores (M) para caber o estouro
     for (int j = 0; j < M - 1; j++) {
         temp_chaves[j] = atual->chaves[j];
         temp_filhos[j] = atual->filhos[j];
     }
     temp_filhos[M - 1] = atual->filhos[M - 1];
 
-    // 2. Encontra a posição e insere a nova chave e seu filho no array temporário
+    // 2. Insere a nova chave ordenadamente no array temporário
     int i = M - 2;
     while (i >= 0 && temp_chaves[i].matricula > nova->matricula) {
         temp_chaves[i + 1] = temp_chaves[i];
@@ -205,25 +232,25 @@ void realizarSplit(NO *atual, chave *nova, NO *filho_da_nova, chave *promovida, 
         i--;
     }
     temp_chaves[i + 1] = *nova;
-    temp_filhos[i + 2] = filho_da_nova; // Se for folha, isso será NULL, o que é perfeito!
+    temp_filhos[i + 2] = filho_da_nova; // Se for folha, recebe NULL automaticamente
 
-    // 3. Prepara a divisão
+    // 3. Prepara o novo nó direito
     NO *novoNo = criarNO();
-    novoNo->eh_folha = atual->eh_folha; // O novo nó herda a "natureza" do nó original
+    novoNo->eh_folha = atual->eh_folha; // Herda a característica (se era folha, continua folha)
     int meio = M / 2;
 
-    // 4. Metade inferior volta para o nó atual
+    // 4. Mantém a metade inferior no nó atual
     atual->qtd = meio;
     for (int j = 0; j < meio; j++) {
         atual->chaves[j] = temp_chaves[j];
         atual->filhos[j] = temp_filhos[j];
     }
-    atual->filhos[meio] = temp_filhos[meio]; // Último filho do lado esquerdo
+    atual->filhos[meio] = temp_filhos[meio]; 
 
-    // 5. A chave do meio sobe
+    // 5. Separa a chave central para ser promovida ao pai
     *promovida = temp_chaves[meio];
 
-    // 6. Metade superior vai para o novo nó direito
+    // 6. Move a metade superior para o novo nó direito
     novoNo->qtd = M - 1 - meio;
     for (int j = 0; j < novoNo->qtd; j++) {
         novoNo->chaves[j] = temp_chaves[meio + 1 + j];
@@ -231,37 +258,35 @@ void realizarSplit(NO *atual, chave *nova, NO *filho_da_nova, chave *promovida, 
     }
     novoNo->filhos[novoNo->qtd] = temp_filhos[M];
 
-    // 7. Retorna o novo nó criado
+    // 7. Retorna o novo nó criado por referência
     *novo_filho_dir = novoNo;
 }
 
+// ============================================================================
+// 3. BUSCA E RECUPERAÇÃO DE DADOS
+// ============================================================================
 
-// Função auxiliar recursiva para descer na Árvore B e encontrar a posição
 NO* buscarNaArvore(NO *atual, int matricula, int *pos_encontrada) {
     if (atual == NULL) return NULL;
     
     int i = 0;
-    // Percorre as chaves do nó até encontrar o local certo
     while (i < atual->qtd && matricula > atual->chaves[i].matricula) {
         i++;
     }
     
-    // Verificamos se encontramos a chave exata neste nó
+    // Encontrou no nó atual
     if (i < atual->qtd && matricula == atual->chaves[i].matricula) {
         *pos_encontrada = atual->chaves[i].posicao;
         return atual; 
     }
     
-    // Se chegamos numa folha e a chave não está aqui, ela não existe
-    if (atual->eh_folha) {
-        return NULL;
-    }
+    // Não encontrou e não tem para onde descer
+    if (atual->eh_folha) return NULL;
     
-    // Se não for folha, desce recursivamente para o filho adequado
+    // Desce para o filho apropriado
     return buscarNaArvore(atual->filhos[i], matricula, pos_encontrada);
 }
 
-// Função principal solicitada
 int pesquisar(arvB *raiz, FILE *dados, int matricula) {
     if (raiz == NULL || *raiz == NULL) return 0;
 
@@ -269,12 +294,12 @@ int pesquisar(arvB *raiz, FILE *dados, int matricula) {
     NO *encontrado = buscarNaArvore(*raiz, matricula, &posicao_dado);
 
     if (encontrado == NULL) {
-        printf("Matrícula %d não encontrada na Árvore B.\n", matricula);
+        printf("Aviso: Matrícula %d não encontrada na Árvore B.\n", matricula);
         return 0;
     }
 
-    // Achou na árvore! Agora vamos buscar o restante das infos no fonte.txt
-    rewind(dados); // Volta para o começo do arquivo
+    // Como achamos na árvore, vamos cruzar com o arquivo texto
+    rewind(dados); 
     char linha[256];
     int achou_no_arquivo = 0;
     dado info;
@@ -282,16 +307,12 @@ int pesquisar(arvB *raiz, FILE *dados, int matricula) {
     while (fgets(linha, sizeof(linha), dados) != NULL) {
         int pos_lida, mat_lida;
         
-        // Lê rapidamente só os primeiros dados da linha para confirmar
+        // Verifica primeiro apenas as chaves para ter performance
         if (sscanf(linha, "%d,%d", &pos_lida, &mat_lida) == 2) {
             if (pos_lida == posicao_dado && mat_lida == matricula) {
-                
-                // Puxa as informações formatadas. O %[^,] serve para ler o nome 
-                // lidando com os espaços, parando apenas quando bater na vírgula.
-                // Caso a linha tenha dados extras concatenados no final, o sscanf
-                // vai apenas focar nos campos que pedimos e ignorar o resto com segurança.
-                sscanf(linha, "%d,%d,%[^,],%s", &info.posicao, &info.matricula, info.nome, &info.telefone);
-                
+                // Lê o resto da linha se for a correta
+                // Nota: info.telefone é char[], não usa '&'
+                sscanf(linha, "%d,%d,%[^,],%s", &info.posicao, &info.matricula, info.nome, info.telefone);
                 achou_no_arquivo = 1;
                 break;
             }
@@ -307,25 +328,23 @@ int pesquisar(arvB *raiz, FILE *dados, int matricula) {
         printf("===========================\n");
         return 1;
     } else {
-        printf("Inconsistência: Chave encontrada na árvore, mas arquivo fonte não contém o dado.\n");
+        printf("Erro Crítico: Chave na árvore não corresponde a um dado no arquivo.\n");
         return 0;
     }
 }
 
+// ============================================================================
+// 4. PERSISTÊNCIA (GRAVAÇÃO DO ÍNDICE)
+// ============================================================================
 
-
-// ==========================================
-// FUNÇÕES AUXILIARES PARA GRAVAÇÃO
-// ==========================================
-
-// Função que percorre a árvore e guarda todos os nós em um array para dar um "ID" a eles
 void mapearArvore(NO *atual, NO **mapa, int *contador_id) {
     if (atual == NULL) return;
     
+    // Atribui um ID sequencial para o nó guardando no array
     mapa[*contador_id] = atual;
     (*contador_id)++;
     
-    // Se não for folha, mapeia os filhos também
+    // Pré-ordem: Grava o pai e depois os filhos
     if (!atual->eh_folha) {
         for (int i = 0; i <= atual->qtd; i++) {
             mapearArvore(atual->filhos[i], mapa, contador_id);
@@ -333,118 +352,89 @@ void mapearArvore(NO *atual, NO **mapa, int *contador_id) {
     }
 }
 
-// Função que busca qual é o "ID" numérico de um ponteiro específico
 int obterIdNo(NO **mapa, int total_nos, NO *alvo) {
     if (alvo == NULL) return -1;
     for (int i = 0; i < total_nos; i++) {
-        if (mapa[i] == alvo) return i; // Retorna a posição (que funciona como ID)
+        if (mapa[i] == alvo) return i; // A posição no mapa vira o ID
     }
     return -1;
 }
 
-// ==========================================
-// FUNÇÃO PRINCIPAL DE GRAVAÇÃO
-// ==========================================
-
 int gravar(arvB *raiz, FILE *indice) {
     if (raiz == NULL || *raiz == NULL) {
-        printf("Árvore vazia. Nada a gravar.\n");
+        printf("Aviso: Árvore vazia. Nada a gravar.\n");
         return 0;
     }
     if (indice == NULL) return 0;
 
-    // Volta o cursor do arquivo para o início para reescrever o índice
-    rewind(indice); 
+    rewind(indice); // Garante que vamos sobrescrever desde o começo
 
-    // Cria um mapa para até 1000 nós (aumente se sua árvore for ficar gigante)
     NO *mapa[1000]; 
     int total_nos = 0;
     
-    // 1. Mapeia todos os nós para gerar os IDs
+    // 1. Gera IDs numéricos para todos os ponteiros
     mapearArvore(*raiz, mapa, &total_nos);
 
-    // 2. Grava nó por nó no formato fixo
+    // 2. Grava no formato engessado para facilitar o load futuro
     for (int i = 0; i < total_nos; i++) {
         NO *no = mapa[i];
 
-        // Grava: numnó, ORDEM
+        // ID e ORDEM
         fprintf(indice, "%d,%d,", i, M); 
 
-        // Grava: chaves (matriculas)
+        // Chaves
         for (int j = 0; j < M - 1; j++) {
-            if (j < no->qtd) {
-                fprintf(indice, "%d,", no->chaves[j].matricula);
-            } else {
-                fprintf(indice, "-1,"); // Preenche o vazio com -1
-            }
+            if (j < no->qtd) fprintf(indice, "%d,", no->chaves[j].matricula);
+            else fprintf(indice, "-1,"); 
         }
 
-        // Grava: posicoes na fonte
+        // Posições
         for (int j = 0; j < M - 1; j++) {
-            if (j < no->qtd) {
-                fprintf(indice, "%d,", no->chaves[j].posicao);
-            } else {
-                fprintf(indice, "-1,"); // Preenche o vazio com -1
-            }
+            if (j < no->qtd) fprintf(indice, "%d,", no->chaves[j].posicao);
+            else fprintf(indice, "-1,"); 
         }
 
-        // Grava: filhos (convertendo os ponteiros para seus IDs numéricos)
+        // Filhos (Substitui ponteiro pelo ID no array)
         for (int j = 0; j < M; j++) {
             if (!no->eh_folha && j <= no->qtd) {
-                int id_filho = obterIdNo(mapa, total_nos, no->filhos[j]);
-                fprintf(indice, "%d", id_filho);
+                fprintf(indice, "%d", obterIdNo(mapa, total_nos, no->filhos[j]));
             } else {
-                fprintf(indice, "-1"); // Nó folha ou filho inexistente
+                fprintf(indice, "-1"); 
             }
-            
-            // Adiciona a vírgula, exceto no último elemento da linha
             if (j < M - 1) fprintf(indice, ",");
         }
-        
-        // Pula para a próxima linha (próximo nó)
-        fprintf(indice, "\n");
+        fprintf(indice, "\n"); // Quebra a linha do nó
     }
 
-    printf("Árvore salva com sucesso no índice! (%d nós gravados)\n", total_nos);
+    printf("Sucesso: Árvore indexada (%d nós gravados no total).\n", total_nos);
     return 1;
 }
 
-// ==========================================
-// FUNÇÕES PARA DESTRUIR A ÁRVORE
-// ==========================================
+// ============================================================================
+// 5. GERENCIAMENTO DE MEMÓRIA (DESTRUIÇÃO)
+// ============================================================================
 
-// Função auxiliar recursiva que apaga de baixo para cima (Pós-ordem)
 void liberarNo(NO *atual) {
     if (atual == NULL) return;
 
-    // Se não for folha, primeiro chamamos a liberação para todos os filhos
+    // Pós-ordem: Apaga os filhos ANTES de apagar o pai para não perder referências
     if (!atual->eh_folha) {
-        // Um nó com 'qtd' chaves tem 'qtd + 1' filhos
         for (int i = 0; i <= atual->qtd; i++) {
             liberarNo(atual->filhos[i]);
         }
     }
-
-    // Depois que todos os filhos foram liberados (ou se já era uma folha),
-    // podemos liberar a memória do próprio nó em segurança.
-    free(atual);
+    free(atual); // Destrói de baixo para cima
 }
 
-// Função principal solicitada
 int destruirArvore(arvB *raiz) {
-    // Verifica se o ponteiro da árvore existe
     if (raiz == NULL) return 0; 
 
-    // Se a árvore não estiver vazia, libera todos os nós
     if (*raiz != NULL) {
         liberarNo(*raiz); 
-        *raiz = NULL; // Boa prática: anular o ponteiro após liberar a memória
+        *raiz = NULL; 
     }
 
-    // Lembra do `malloc(sizeof(arvB))` que você fez na função `criarArv`?
-    // Precisamos liberar ele também!
-    free(raiz); 
-
-    printf("Árvore destruída com sucesso e memória liberada!\n");
+    free(raiz); // Libera a casca principal da árvore
+    printf("Sistema: Árvore destruída. Memória RAM liberada com sucesso!\n");
     return 1;
 }
