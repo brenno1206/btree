@@ -1,36 +1,39 @@
-#define B_TREE_H
+#ifndef BTREE_H
+#define BTREE_H
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define M 3
 
-typedef Pagina *ArvoreB;
-
-typedef struct _dado {
-    int indice;
+typedef struct dado {
+    int posicao;
     int matricula;
     char nome[50];
-    int telefone;
+    char telefone[15];
 } dado;
 
-typedef struct _chave {
-    int matricula; 
-    int indice; // posição do registro no arquivo de dados
+typedef struct chave {
+    int matricula;
+    int posicao;
 } chave;
 
-typedef struct _NO {
-    int id_pagina; // Identificador único para cada página (pode ser um número sequencial ou um offset no arquivo)
-    chave chaves[M - 1]; // Cada nó pode conter no máximo M-1
-    int filhos[M];
-    int num_chaves;
+typedef struct NO {
+    int qtd;
+    chave chaves[M-1];
+    struct NO *filhos[M];
     int eh_folha;
 } NO;
 
 typedef struct NO *arvB;
 
-No *criarNo();
+// Protótipos
+arvB *criarArv(FILE *dados);
+NO *criarNO();
 
-int cadastrar(FILE *arvore, dado *elementos, NO *no);
-int pesquisar(FILE *arvore, int matricula);
-int gravar(FILE *arvore);
-int sair(FILE *arvore);
+int cadastrar(arvB *raiz, chave *chave_nova); 
+int pesquisar(arvB *raiz, FILE *dados, int matricula);
+int gravar(arvB *raiz, FILE *indice);
+int destruirArvore(arvB *raiz);
+
+#endif
