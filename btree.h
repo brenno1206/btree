@@ -27,9 +27,10 @@ typedef struct NO {
 
 typedef struct NO *arvB;
 
-// Protótipos
+// Protótipos Principais
 arvB *criarArv(FILE *dados);
 NO *criarNO();
+int popularArv(arvB *raiz, FILE *dados); // CORREÇÃO: Protótipo adicionado
 
 int cadastrar(arvB *raiz, chave *chave_nova); 
 int pesquisar(arvB *raiz, FILE *dados, int matricula);
