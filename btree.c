@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> // CORREÇÃO: Necessário para usar strcspn() no main
+#include <string.h>
 #include "btree.h"
 
 // ============================================================================
@@ -52,7 +52,6 @@ int main()
         ultimo_char = c;
     }
 
-    // === TRAVA DE SEGURANÇA ADICIONADA AQUI ===
     // Se o arquivo não está vazio e a última linha não terminou com uma quebra de linha
     if (ftell(dados) > 0 && ultimo_char != '\n') {
         proxima_posicao++; // Compensa a linha do arquivo que ficou sem o '\n'
