@@ -41,7 +41,6 @@ int main()
         return 1;
     }
 
-    // Conta as linhas do arquivo texto para descobrir a próxima "posição" disponível
     int proxima_posicao = 1;
     rewind(dados);
     char c;
@@ -52,16 +51,13 @@ int main()
         ultimo_char = c;
     }
 
-    // Se o arquivo não está vazio e a última linha não terminou com uma quebra de linha
     if (ftell(dados) > 0 && ultimo_char != '\n') {
-        proxima_posicao++; // Compensa a linha do arquivo que ficou sem o '\n'
+        proxima_posicao++;
         
-        // Força a quebra de linha no arquivo para os próximos cadastros não grudarem
         fseek(dados, 0, SEEK_END);
         fprintf(dados, "\n");
         fflush(dados);
     }
-    // ==========================================
 
     int opcao = 0;
     while (opcao != 4) {
@@ -190,7 +186,6 @@ int popularArv(arvB *raiz, FILE *dados) {
         int posicao = 0;
         int matricula = 0;
 
-        // CORREÇÃO: Formato ajustado para garantir extração correta baseada no arquivo
         if (sscanf(texto_linha, "%d,%d", &posicao, &matricula) == 2) {
             chave chave_lida = { matricula, posicao };
             cadastrar(raiz, &chave_lida); 
@@ -320,10 +315,6 @@ void realizarSplit(NO *atual, chave *nova, NO *filho_da_nova, chave *promovida, 
 // 3. BUSCA E RECUPERAÇÃO DE DADOS
 // ============================================================================
 
-// ============================================================================
-// 3. BUSCA E RECUPERAÇÃO DE DADOS
-// ============================================================================
-
 NO* buscarNaArvore(NO *atual, int matricula, int *pos_encontrada) {
     if (atual == NULL) return NULL;
     
@@ -372,7 +363,6 @@ int pesquisar(arvB *raiz, FILE *dados, int matricula) {
         }
     }
 
-    // 2. MODO DE SEGURANÇA (FALLBACK): Se o pulo falhou (ex: arquivo tem linhas em branco), varre do início
     if (!achou_no_arquivo) {
         rewind(dados);
         while (fgets(linha, sizeof(linha), dados) != NULL) {
@@ -398,6 +388,7 @@ int pesquisar(arvB *raiz, FILE *dados, int matricula) {
         return 0;
     }
 }
+
 // ============================================================================
 // 4. PERSISTÊNCIA (GRAVAÇÃO DO ÍNDICE)
 // ============================================================================
@@ -432,7 +423,7 @@ int gravar(arvB *raiz, FILE *indice) {
 
     rewind(indice);
 
-    NO *mapa[1000]; // Nota: Se sua árvore passar de 1000 nós, aumente este valor.
+    NO *mapa[1000];
     int total_nos = 0;
     
     mapearArvore(*raiz, mapa, &total_nos);
